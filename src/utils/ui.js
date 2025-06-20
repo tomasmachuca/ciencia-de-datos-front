@@ -17,6 +17,9 @@ export async function updateUI(response) {
 
     let modelLoadedIndex = -1;
     let probability = null;
+    let finalPrediction = extractFinalPrediction(modelOutput);
+
+    // Mostrar pasos animados
     for (let i = 0; i < steps.length; i++) {
         await new Promise(res => setTimeout(res, 700)); // animación
         const li = document.createElement('li');
@@ -29,10 +32,9 @@ export async function updateUI(response) {
         li.classList.add('opacity-100');
         if (steps[i].toLowerCase().includes('modelo cargado exitosamente')) {
             modelLoadedIndex = i;
-            // Extraer probabilidad real (si existe)
             probability = getProbabilityFromResponse(response);
             if (probability !== null) {
-                showHealthPrediction(results, probability);
+                showHealthPrediction(results, probability, finalPrediction);
             }
         }
     }
@@ -91,43 +93,61 @@ function getProbabilityFromResponse(response) {
     return null;
 }
 
+// Extrae la predicción final del bloque de model_output
+function extractFinalPrediction(modelOutput) {
+    // Busca el bloque entre ========================= PREDICCIÓN FINAL ========================= y la siguiente =====
+    const blockRegex = /PREDICCIÓN FINAL[\s\S]*?={5,}\s*([\s\S]*?)={5,}/;
+    const match = modelOutput.match(blockRegex);
+    if (!match || !match[1]) return null;
+    const block = match[1];
+    // Extrae líneas clave
+    const repo = (block.match(/Repositorio:\s*(.*)/) || [])[1] || '';
+    const pred = (block.match(/Predicción:\s*(.*)/) || [])[1] || '';
+    const conf = (block.match(/Confianza:\s*(.*)/) || [])[1] || '';
+    const interp = (block.match(/Interpretación:\s*(.*)/) || [])[1] || '';
+    return { repo, pred, conf, interp };
+}
+
 // Muestra el cuadro y el gráfico de torta animado SOLO si hay probabilidad real
-function showHealthPrediction(container, probability) {
+function showHealthPrediction(container, probability, finalPrediction = null) {
     if (probability === null || isNaN(probability)) return;
     const percent = Math.round(probability * 100);
     const unhealthy = 100 - percent;
+    const isHealthy = percent > 50;
 
+    // Contenedor responsivo
     const box = document.createElement('div');
-    box.className = 'my-6 p-6 bg-green-50 border-l-4 border-green-400 rounded-lg shadow flex flex-col md:flex-row items-center gap-6';
+    box.className = `my-6 p-6 ${isHealthy ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-400'} border-l-4 rounded-lg shadow flex flex-col md:flex-row items-center gap-6`;
     box.innerHTML = `
-        <div class="flex-1">
-            <h4 class="text-lg font-bold text-green-800 mb-2 flex items-center gap-2">
-                <svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5 text-green-500' fill='none' viewBox='0 0 24 24' stroke='currentColor'><path stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M9 12l2 2l4-4' /></svg>
-                Predicción de salud del repositorio
-            </h4>
-            <p class="text-green-700 text-base">Probabilidad de ser saludable: <span class="font-bold">${percent}%</span></p>
-            <p class="text-gray-600 text-sm">${percent > 50 ? 'El repositorio es probablemente saludable.' : 'El repositorio podría no ser saludable.'}</p>
+        <div class="flex-1 flex flex-col items-center md:items-start">
+            <canvas id="healthPieChart" width="120" height="120" class="mb-2"></canvas>
         </div>
-        <div class="flex-1 flex justify-center items-center">
-            <canvas id="healthPieChart" width="120" height="120"></canvas>
+        <div class="flex-1 flex flex-col gap-2 items-center md:items-start">
+            ${finalPrediction && finalPrediction.repo ? `<div class="text-xs text-gray-500 mb-1">Repositorio:</div><div class="font-semibold text-gray-800 mb-2">${finalPrediction.repo}</div>` : ''}
+            ${finalPrediction && finalPrediction.pred ? `<div class="mb-1"><span class="inline-block px-2 py-1 rounded text-sm font-bold ${isHealthy ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}">${finalPrediction.pred.toUpperCase()}</span></div>` : ''}
+            ${finalPrediction && finalPrediction.conf ? `<div class="mb-1 text-gray-700">Confianza: <span class="font-semibold">${finalPrediction.conf}</span></div>` : ''}
+            ${finalPrediction && finalPrediction.interp ? `<div class="text-gray-700 text-sm mt-2">${finalPrediction.interp}</div>` : ''}
         </div>
     `;
     container.appendChild(box);
 
     // Gráfico de torta animado (canvas)
     setTimeout(() => {
-        drawAnimatedPieChart('healthPieChart', percent, unhealthy);
+        drawAnimatedPieChart('healthPieChart', percent, unhealthy, isHealthy);
     }, 300);
 }
 
 // Dibuja un gráfico de torta animado en canvas
-function drawAnimatedPieChart(canvasId, healthyPercent, unhealthyPercent) {
+function drawAnimatedPieChart(canvasId, healthyPercent, unhealthyPercent, isHealthy = true) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const total = healthyPercent + unhealthyPercent;
     let current = 0;
     const step = healthyPercent / 40; // animación en 40 frames
+    const color = isHealthy ? '#34d399' : '#ef4444'; // verde o rojo
+    const textColor = isHealthy ? '#065f46' : '#991b1b';
+    const label = isHealthy ? 'Saludable' : 'Poco saludable';
 
     function draw(p) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -136,19 +156,23 @@ function drawAnimatedPieChart(canvasId, healthyPercent, unhealthyPercent) {
         ctx.arc(60, 60, 55, 0, 2 * Math.PI);
         ctx.fillStyle = '#e5e7eb';
         ctx.fill();
-        // Saludable
+        // Saludable o no saludable
         ctx.beginPath();
         ctx.moveTo(60, 60);
         ctx.arc(60, 60, 55, -0.5 * Math.PI, (-0.5 + 2 * p / 100) * Math.PI);
         ctx.closePath();
-        ctx.fillStyle = '#34d399';
+        ctx.fillStyle = color;
         ctx.fill();
-        // Texto
-        ctx.font = 'bold 22px sans-serif';
-        ctx.fillStyle = '#065f46';
+        // Porcentaje
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillStyle = textColor;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(Math.round(p) + '%', 60, 60);
+        ctx.fillText(Math.round(p) + '%', 60, 54);
+        // Predicción textual
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillStyle = textColor;
+        ctx.fillText(label, 60, 75);
     }
 
     function animate() {
