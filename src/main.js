@@ -1,5 +1,5 @@
 import './styles/main.css';
-import { analyzeRepository } from './services/analyzer';
+import { downloadEvents } from './services/api';
 import { updateUI } from './utils/ui';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,7 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const repoUrl = document.getElementById('repoUrl').value;
         
         try {
-            const analysisResult = await analyzeRepository(repoUrl);
+            const analysisResult = await downloadEvents(repoUrl);
+            console.log('Respuesta del backend:', analysisResult);
             updateUI(analysisResult);
             
             // Show results
